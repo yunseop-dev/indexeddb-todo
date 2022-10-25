@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { databaseInstance } from './db/index';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useVirtualizer } from '@tanstack/react-virtual'
 
 function App() {
   const [text, setText] = useState('');
@@ -9,6 +10,14 @@ function App() {
   const todos = useLiveQuery(() => {
     return isOrdered ? db.todos.orderBy('created').reverse().toArray() : db.todos.toArray();
   }, [isOrdered]);
+
+  const parentRef = React.useRef<HTMLDivElement>(null)
+
+  const rowVirtualizer = useVirtualizer({
+    count: todos?.length ?? 0,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (index) => 22 + index,
+  })
 
   const onSubmitAdd = useCallback(async () => {
     await db.todos.add({
@@ -45,19 +54,56 @@ function App() {
         </button>
       </form>
       <button type="button" onClick={onClickOrder}>정렬</button>
-      <ul>
-        {todos?.map((todo) => (
-          <li key={todo.id}>
-            <input id={todo.id?.toString()} type="checkbox" onChange={() => onToggleDone(todo.id as any)} checked={todo.done} />
-            <label htmlFor={todo.id?.toString()}>
-              <span style={{ textDecoration: todo.done ? 'line-through' : '' }}>
-                {todo.text} / {todo.created}
-              </span>
-            </label>
-            <button type="button" onClick={() => onClickDeleteItem(todo.id as any)}>X</button>
-          </li>
-        ))}
-      </ul>
+      <button onClick={() => rowVirtualizer.scrollToIndex(500)}>
+        Scroll to index 500
+      </button>
+      <div
+        ref={parentRef}
+        className="List"
+        style={{
+          height: `100vh`,
+          width: `400px`,
+          overflow: 'auto',
+        }}
+      >
+        <ul
+          style={{
+            height: rowVirtualizer.getTotalSize(),
+            position: 'relative',
+          }}
+        >
+          {rowVirtualizer.getVirtualItems().map((virtualItem) => {
+            const todo = todos?.[virtualItem.index];
+            return (
+              <li
+                key={virtualItem.key}
+                ref={virtualItem.measureElement}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualItem.start}px)`,
+                  height: virtualItem.index + 22
+                }}
+              >
+                <input
+                  id={todo?.id?.toString()}
+                  type="checkbox"
+                  onChange={() => onToggleDone(todo?.id as any)}
+                  checked={todo?.done}
+                />
+                <label htmlFor={todo?.id?.toString()}>
+                  <span style={{ textDecoration: todo?.done ? 'line-through' : '' }}>
+                    {todo?.text} / {todo?.created}
+                  </span>
+                </label>
+                <button type="button" onClick={() => onClickDeleteItem(todo?.id as any)}>X</button>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
     </div>
   );
 }
