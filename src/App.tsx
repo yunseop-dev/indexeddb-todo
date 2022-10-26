@@ -1,111 +1,93 @@
-import React, { useCallback, useMemo, useState } from "react";
-import { databaseInstance } from './db/index';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { useVirtualizer } from '@tanstack/react-virtual'
+import React, { useCallback, useEffect, useState } from 'react';
+import * as Database from './Database';
+import { useQuery } from '@tanstack/react-query';
+import { TodoRxDocument } from './Schema';
+import { v4 as uuid } from 'uuid';
 
-function App() {
+const App = () => {
+  const [todos, setTodos] = useState<TodoRxDocument[]>([]);
+  const [loading, setLoading] = useState(false);
+  const { data: db } = useQuery(['db'], () => Database.get())
+
   const [text, setText] = useState('');
-  const [isOrdered, setIsOrdered] = useState(false);
-  const db = useMemo(() => databaseInstance, []);
-  const todos = useLiveQuery(() => {
-    return isOrdered ? db.todos.orderBy('created').reverse().toArray() : db.todos.toArray();
-  }, [isOrdered]);
+  const deleteTodo = useCallback(async (todo: TodoRxDocument) => {
+    console.log('delete todo:');
+    console.dir(todo);
+    await todo.remove();
+  }, [])
 
-  const parentRef = React.useRef<HTMLDivElement>(null)
-
-  const rowVirtualizer = useVirtualizer({
-    count: todos?.length ?? 0,
-    getScrollElement: () => parentRef.current,
-    estimateSize: (index) => 22 + index,
-  })
-
-  const onSubmitAdd = useCallback(async () => {
-    await db.todos.add({
-      text: text, done: false, created: Date.now()
+  const toggleTodo = useCallback(async (todo: TodoRxDocument) => {
+    console.log('toggle todo:');
+    console.dir(todo);
+    await todo.atomicPatch({
+      done: !todo.done
     })
-  }, [db.todos, text]);
+  }, [])
 
-  const onToggleDone = useCallback(async (id: number) => {
-    const item = await db.todos.get(id);
-    if (item) {
-      await db.todos.update(id, { done: !item.done })
-    } else {
-      alert('item not found!');
+  const addTodo = useCallback(async (event: any) => {
+    event.preventDefault();
+    const db = await Database.get();
+    const addData = {
+      id: uuid(), text,
+    };
+    await db.todos.insert(addData);
+    setText('');
+  }, [text])
+
+  const handleTextChange = useCallback((event: any) => {
+    setText(event.target.value);
+  }, [])
+
+  useEffect(() => {
+    try {
+      const sub = db?.todos.find().$.subscribe((todos: TodoRxDocument[]) => {
+        if (!todos) {
+          return;
+        }
+        console.log('reload todos-list ');
+        console.dir(todos);
+        setTodos(todos);
+        setLoading(false)
+      });
+
+      return () => sub?.unsubscribe();
+    } catch (error) {
+      console.log(error);
     }
   }, [db])
 
-  const onClickDeleteItem = useCallback(async (id: number) => {
-    await db.todos.delete(id);
-  }, [db]);
-
-  const onClickOrder = useCallback(() => {
-    setIsOrdered(val => !val);
-  }, []);
-
   return (
     <div>
-      <h1>Hello IndexedDB!</h1>
-      <form onSubmit={onSubmitAdd}>
-        <h2>dexie with hooks</h2>
-        <label htmlFor="todo-input">할 일 입력</label>
-        <input id="todo-input" type="text" onChange={(e) => setText(e.target.value)} value={text} />
-        <button type="submit">
-          Add
-        </button>
-      </form>
-      <button type="button" onClick={onClickOrder}>정렬</button>
-      <button onClick={() => rowVirtualizer.scrollToIndex(500)}>
-        Scroll to index 500
-      </button>
-      <div
-        ref={parentRef}
-        className="List"
-        style={{
-          height: `100vh`,
-          width: `400px`,
-          overflow: 'auto',
-        }}
-      >
-        <ul
-          style={{
-            height: rowVirtualizer.getTotalSize(),
-            position: 'relative',
-          }}
-        >
-          {rowVirtualizer.getVirtualItems().map((virtualItem) => {
-            const todo = todos?.[virtualItem.index];
-            return (
-              <li
-                key={virtualItem.key}
-                ref={virtualItem.measureElement}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  transform: `translateY(${virtualItem.start}px)`,
-                  height: virtualItem.index + 22
-                }}
-              >
-                <input
-                  id={todo?.id?.toString()}
-                  type="checkbox"
-                  onChange={() => onToggleDone(todo?.id as any)}
-                  checked={todo?.done}
-                />
-                <label htmlFor={todo?.id?.toString()}>
-                  <span style={{ textDecoration: todo?.done ? 'line-through' : '' }}>
-                    {todo?.text} / {todo?.created}
-                  </span>
-                </label>
-                <button type="button" onClick={() => onClickDeleteItem(todo?.id as any)}>X</button>
-              </li>
-            )
-          })}
-        </ul>
+      <h1>RxDB Example - React</h1>
+      <div>
+        <h3>Todos</h3>
+        {loading && <span>Loading...</span>}
+        {!loading && todos.length === 0 && <span>No todos</span>}
+        {!loading &&
+          <ul>
+            {todos.map((todo) => {
+              return (
+                <li key={todo.id}>
+                  <input type="checkbox" name={todo.id} aria-label={todo.id} onChange={() => toggleTodo(todo)} checked={todo.done} />
+                  <label htmlFor={todo.id}>
+                    {todo.text}
+                  </label>
+                  <button type="button" onClick={() => deleteTodo(todo)}>DELETE</button>
+                </li>
+              );
+            })}
+          </ul>
+        }
+      </div>
+      <div>
+        <h3>Add Todo</h3>
+        <form onSubmit={addTodo}>
+          <input type="text" name="text" placeholder="Name" value={text} onChange={handleTextChange} />
+          <button type="submit">Insert a Todo</button>
+        </form>
       </div>
     </div>
   );
-}
+};
 
 export default App;
